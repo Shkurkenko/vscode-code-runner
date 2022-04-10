@@ -3,10 +3,14 @@ import * as vscode from 'vscode';
 import * as inspector from 'inspector';
 import * as path from 'path';
 import * as util from 'util';
-import { versions } from 'process';
+import { memoryUsage, versions } from 'process';
 import * as fs from 'fs';
+import * as kill from 'tree-kill';
+
+// console.log(vscode.Disposable);
 
 const activeTextEditor = vscode.window.activeTextEditor;
+
 let decorationTypes: any = [];
 
 const makeDecorationWithText = (
@@ -48,17 +52,19 @@ export async function activate(context: vscode.ExtensionContext) {
 	clearDecorations();
 
 	let disposable = vscode.commands.registerCommand('coderunner3.coderun', async () => {
-		const session = new inspector.Session();
-		session.connect();
 
-		const post = <any>util.promisify(session.post).bind(session);
 
 		vscode.window.showInformationMessage('Coderun is working!');
 
 		vscode.workspace.onDidSaveTextDocument(async () => {
+			const session = new inspector.Session();
+			session.connect();
+
+			const post = <any>util.promisify(session.post).bind(session);
 			clearDecorations();
-
-
+			// await post('Memory.forciblyPurgeJavaScriptMemory');
+			await post('Runtime.disable');
+			// await post('Runtime.addBinding', 'variables');
 			await post('Runtime.enable');
 			await post('Debugger.enable');
 			const activeEditor = vscode.window.activeTextEditor;
@@ -73,22 +79,34 @@ export async function activate(context: vscode.ExtensionContext) {
 					sourceURL: filename,
 					persistScript: true
 				});
-
+			// console.log(scriptId);
 			await post('Runtime.runScript', { scriptId });
 			const data = await post('Runtime.globalLexicalScopeNames', {
 				executionContextId: 1
 			});
 
+			// console.log(data.names[0]);
+
 			data.names.map(async (expression: string) => {
+				console.log(expression);
 				const executionResult = await post('Runtime.evaluate', { expression, contextId: 1 });
 				const { value } = executionResult.result;
+				// console.log(executionResult.result);
 				const { result } = await post('Debugger.searchInContent', {
 					scriptId, query: expression
 				});
+				// for(let i = 0; i < result.length; i++) {
+				// 	let test = await post('Runtime.evaluate', { expression: result[i].lineContent, contextId: 1 });
+				// 	console.log(test);
+				// }
+				// console.log(executionResult);
 				makeDecorationWithText(`${value}`, result[0].lineNumber, result[0].lineContent.length, activeEditor);
 			});
 			await post('Runtime.disable');
 			await post('Debugger.disable');
+			// await post('Debugger.setBreakpoint', { scriptId, lineNumber: 1 });
+			// await post('CacheStorage.deleteCache', { cacheId: scriptId });
+			session.disconnect();
 		});
 	});
 
@@ -96,5 +114,5 @@ export async function activate(context: vscode.ExtensionContext) {
 }
 
 export function deactivate() {
-
+	clearDecorations();
 }
